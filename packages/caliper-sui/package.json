@@ -1,0 +1,24 @@
+{
+  "name": "caliper-sui",
+  "version": "0.5.1-unstable",
+  "description": "Sui connector for Caliper, enabling the running of performance benchmarks that interact with Sui",
+  "main": "index.js",
+  "scripts": {
+    "test": "npm run lint"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kekeho/caliper.git",
+    "directory": "packages/caliper-ethereum"
+  },
+  "author": "Hiroki TAKEMURA",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/kekeho/caliper/issues"
+  },
+  "homepage": "https://github.com/kekeho/caliper#readme",
+  "dependencies": {
+    "@hyperledger/caliper-core": "^0.5.0",
+    "@mysten/sui.js": "^0.0.0-experimental-20221205171552"
+  }
+}

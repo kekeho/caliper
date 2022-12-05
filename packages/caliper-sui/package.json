@@ -2,7 +2,6 @@
   "name": "caliper-sui",
   "version": "0.5.1-unstable",
   "description": "Sui connector for Caliper, enabling the running of performance benchmarks that interact with Sui",
-  "main": "index.js",
   "scripts": {
     "test": "npm run lint"
   },

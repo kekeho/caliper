@@ -77,3 +77,8 @@ sut:
         1.4: &besu-latest
             packages: ['web3@1.3.0']
         latest: *besu-latest
+    
+    sui:
+        1.0: &sui-latest
+            packages: ['@mysten/sui.js@^0.0.0-experimental-20221205171552']
+        latest: *sui-latest

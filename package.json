@@ -17,7 +17,10 @@
         "node": ">=14.19.0",
         "npm": ">=7.24.2"
     },
-    "dependencies": {},
+    "dependencies": {
+        "@mysten/sui.js": "^0.20.0",
+        "web3": "^1.3.0"
+    },
     "devDependencies": {
         "license-check-and-add": "2.3.6",
         "repolinter": "0.8.2"

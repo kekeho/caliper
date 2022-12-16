@@ -18,6 +18,6 @@
   "homepage": "https://github.com/kekeho/caliper#readme",
   "dependencies": {
     "@hyperledger/caliper-core": "^0.5.0",
-    "@mysten/sui.js": "^0.0.0-experimental-20221205171552"
+    "@mysten/sui.js": "^0.20.0"
   }
 }

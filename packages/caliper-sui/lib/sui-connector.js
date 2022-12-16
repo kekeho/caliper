@@ -80,6 +80,19 @@ class SuiConnector extends ConnectorBase {
         logger.info(`Deployed contracts: ${JSON.stringify(this.contracts)}`);
     }
 
+
+    async prepareWorkerArguments(number) {
+        let result = [];
+        for (let i = 0; i < number; i++) {
+            result[i] = {
+                contracts: this.contracts
+            };
+        }
+
+        return result;
+    }
+
+
     async callRpc(method, params) {
         const data = {
             "jsonrpc": "2.0",

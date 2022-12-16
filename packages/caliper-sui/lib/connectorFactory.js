@@ -9,7 +9,7 @@ const SuiConnector = require('./sui-connector');
  * @async
  */
 async function connectorFactory(workerIndex) {
-    return new SuiConnector(workerIndex, 'ethereum');
+    return new SuiConnector(workerIndex, 'sui');
 }
 
 module.exports.ConnectorFactory = connectorFactory;

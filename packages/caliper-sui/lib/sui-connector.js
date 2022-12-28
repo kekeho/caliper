@@ -65,8 +65,8 @@ class SuiConnector extends ConnectorBase {
         let txbytes = new Base64DataBuffer(resp_json.result.txBytes);
 
         let publishTxn = await this.contractDeployerSigner.signAndExecuteTransaction(txbytes);
-        console.log(publishTxn.EffectsCert);
         assert.equal(publishTxn.EffectsCert.effects.effects.status.status, "success");
+
         for (let i = 0; i < publishTxn.EffectsCert.effects.effects.created.length; i++) {
             const element = publishTxn.EffectsCert.effects.effects.created[i];
             let packageId = element.reference.objectId;
@@ -87,6 +87,69 @@ class SuiConnector extends ConnectorBase {
         }
 
         return result;
+    }
+
+
+    async getContext(roundIndex, args) {
+        let context = {
+            clientIndex: this.workerIndex,
+            contracts: args.contracts,
+        }
+
+        this.context = context;
+        return context;
+    }
+
+
+    async releaseContext() {
+        // nothing to do
+    }
+
+    /**
+     * Send transaction to SUT from Worker
+     * @param {} requests
+     * @return {Promise<TxStatus>}
+     */
+    async _sendSingleRequest(requests) {
+        if (requests.readOnly === true) {
+            return this.readRequest(requests);
+        }
+
+
+        let context = this.context;
+        let method = requests.verb;
+
+        let packageId = context.contracts[requests.package];
+        let transaction = {
+            signer: await this.fromSigner.getAddress(),
+            arguments: Object.values(requests.args),
+            function: requests.verb,
+            gasBudget: 1000,  // TODO: estimate
+            module: requests.module,
+            packageObjectId: packageId,
+            typeArguments: [],
+        };
+        let resp_json = await this.callRpc("sui_moveCall", transaction);
+        let txbytes = new Base64DataBuffer(resp_json.result.txBytes);
+
+        let status = new TxStatus();
+        let txResp = await this.fromSigner.signAndExecuteTransaction(txbytes);
+
+        if (txResp.EffectsCert.effects.effects.status.status == "success") {
+            status.SetStatusSuccess();
+        } else {
+            status.SetStatusFail();
+            status.SetErrMsg(txResp.effects.status.error);
+        }
+        status.SetID(txResp.transactionDigest);
+        status.SetResult(txResp);
+
+        return status
+    }
+
+
+    async readRequest() {
+        // TODO: IMPL
     }
 
 

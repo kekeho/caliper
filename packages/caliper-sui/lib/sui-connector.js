@@ -34,11 +34,67 @@ class SuiConnector extends ConnectorBase {
         this.fromSigner = new RawSigner(this.fromKeypair, this.suiProvider);
 
         this.contracts = {};
+        this.gasCoins = Array();
+
+        this.rpcId = 1;
     }
 
 
     async init() {
         // Initialization
+
+        // Split coin for gas
+        let resp = await this.callRpc('sui_getCoins', {
+            owner: this.fromKeypair.getPublicKey().toSuiAddress(),
+            coin_type: '0x2::sui::SUI',
+        });
+        if (resp.hasOwnProperty('error')) {
+            CaliperUtils.log('Sui RPC Error: sui_getCoins');
+            return -1;
+        }
+
+        let coins = resp.result.data;
+        let coin = coins[0].coinObjectId;
+
+        let gasBudgerAmount = 65 * this.suiConfig.coins.numberOfCoins;
+
+        let createGasCoinTx = await this.callRpc('sui_transferSui', {
+            "signer": this.fromKeypair.getPublicKey().toSuiAddress(),
+            sui_object_id: coin,
+            gas_budget: 1000,
+            recipient: this.fromKeypair.getPublicKey().toSuiAddress(),
+            amount: gasBudgerAmount,
+        });
+        if (createGasCoinTx.hasOwnProperty('error')) {
+            CaliperUtils.log('Sui RPC Error: sui_transferSui');
+            return -1;
+        }
+
+        let createGasCoinResp = await this.fromSigner.signAndExecuteTransaction(new Base64DataBuffer(createGasCoinTx.result.txBytes));
+
+        let split_amounts = Array(this.suiConfig.coins.numberOfCoins);
+        for (let i = 0; i < this.suiConfig.coins.numberOfCoins; i++) {
+            split_amounts[i] = this.suiConfig.coins.eachAmount;
+        }
+
+        let splitCoinTx = await this.callRpc('sui_splitCoin', {
+            signer: this.fromKeypair.getPublicKey().toSuiAddress(),
+            coin_object_id: coin,
+            split_amounts: split_amounts,
+            gas_budget: gasBudgerAmount,
+            gas: createGasCoinResp.EffectsCert.effects.effects.created[0].reference.objectId,
+        });
+        if (splitCoinTx.hasOwnProperty('error')) {
+            CaliperUtils.log('Sui RPC Error: sui_transferSui');
+            return -1;
+        }
+
+        let splitted = await this.fromSigner.signAndExecuteTransaction(new Base64DataBuffer(splitCoinTx.result.txBytes));
+        
+        for (let i = 0; i < splitted.EffectsCert.effects.effects.created.length; i++) {
+            const c = splitted.EffectsCert.effects.effects.created[i];
+            this.gasCoins.push(c.reference.objectId);
+        }
     }
 
     /**
@@ -80,9 +136,16 @@ class SuiConnector extends ConnectorBase {
 
     async prepareWorkerArguments(number) {
         let result = [];
+
+        let gasCoins = Array(number);
+        for (let i = 0; i < number; i++) {
+            gasCoins[i] = this.gasCoins.slice(i * Math.ceil(this.gasCoins.length / number), (i+1) * Math.ceil(this.gasCoins.length / number));
+        }
+
         for (let i = 0; i < number; i++) {
             result[i] = {
-                contracts: this.contracts
+                contracts: this.contracts,
+                gasCoins: gasCoins[i],
             };
         }
 
@@ -94,6 +157,7 @@ class SuiConnector extends ConnectorBase {
         let context = {
             clientIndex: this.workerIndex,
             contracts: args.contracts,
+            gasCoins: args.gasCoins,
         }
 
         this.context = context;
@@ -115,15 +179,14 @@ class SuiConnector extends ConnectorBase {
             return this.readRequest(requests);
         }
 
+        let packageId = this.context.contracts[requests.package];
+        let gas = this.context.gasCoins.pop();
 
-        let context = this.context;
-        let method = requests.verb;
-
-        let packageId = context.contracts[requests.package];
         let transaction = {
             signer: await this.fromSigner.getAddress(),
             arguments: Object.values(requests.args),
             function: requests.verb,
+            gas: gas,
             gasBudget: 1000,  // TODO: estimate
             module: requests.module,
             packageObjectId: packageId,
@@ -144,7 +207,7 @@ class SuiConnector extends ConnectorBase {
         status.SetID(txResp.transactionDigest);
         status.SetResult(txResp);
 
-        return status
+        return status;
     }
 
 
@@ -156,7 +219,7 @@ class SuiConnector extends ConnectorBase {
     async callRpc(method, params) {
         const data = {
             "jsonrpc": "2.0",
-            "id": 1,
+            "id": this.rpcId++,
             "method": method,
             "params": params
         }

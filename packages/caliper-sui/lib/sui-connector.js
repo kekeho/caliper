@@ -195,17 +195,42 @@ class SuiConnector extends ConnectorBase {
         let resp_json = await this.callRpc("sui_moveCall", transaction);
         let txbytes = new Base64DataBuffer(resp_json.result.txBytes);
 
-        let status = new TxStatus();
-        let txResp = await this.fromSigner.signAndExecuteTransaction(txbytes);
 
-        if (txResp.EffectsCert.effects.effects.status.status == "success") {
+        let status = new TxStatus();
+
+        // BCS Serialize
+        const INTENT_BYTES = [0, 0, 0];
+        let intentMessage = new Uint8Array(INTENT_BYTES.length + txbytes.getLength());
+        intentMessage.set(INTENT_BYTES);
+        intentMessage.set(txbytes.getData(), INTENT_BYTES.length);
+        
+        let dataToSign = new Base64DataBuffer(intentMessage);
+        let signed = await this.fromSigner.signData(dataToSign);
+
+        let executedResp = await this.callRpc(
+            "sui_executeTransaction",
+            {
+                tx_bytes: txbytes.toString(),
+                sig_scheme: signed.signatureScheme,
+                signature: signed.signature.toString(),
+                pub_key: signed.pubKey.toBase64(),
+                request_type: 'WaitForLocalExecution',
+            }
+        )
+
+        if (executedResp.hasOwnProperty('error')) {
+            status.SetStatusFail();
+            status.SetErrMsg(executedResp.error.message);
+            CaliperUtils.log("Failed", requests, JSON.stringify(executedResp, null, 2));
+        } else if (executedResp.result.EffectsCert.effects.effects.status.status == "success") {
             status.SetStatusSuccess();
+            status.SetID(executedResp.result.EffectsCert.certificate.transactionDigest);
+            status.SetResult(executedResp);
         } else {
             status.SetStatusFail();
-            status.SetErrMsg(txResp.effects.status.error);
+            status.SetErrMsg(executedResp.result.EffectsCert.effects.effects.status.status);
+            CaliperUtils.log("Failed", requests, JSON.stringify(executedResp, null, 2));
         }
-        status.SetID(txResp.transactionDigest);
-        status.SetResult(txResp);
 
         return status;
     }

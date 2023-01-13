@@ -103,34 +103,55 @@ class SuiConnector extends ConnectorBase {
     async installSmartContract() {
         logger.info('Creating contracts...');
 
-        let params = [
-            this.contractDeployerKeypair.getPublicKey().toSuiAddress(),
-            [],
-            null,
-            10000
-        ]
-
         for (const key of Object.keys(this.suiConfig.contracts)) {
             const contractConfig = this.suiConfig.contracts[key];
             const contractPath = path.join(this.srcPath, contractConfig.path);
             const modulebytes = fs.readFileSync(contractPath, 'base64');
-            params[1].push(modulebytes);
+
+            let resp_json = await this.callRpc(
+                'sui_publish',
+                [
+                    this.contractDeployerKeypair.getPublicKey().toSuiAddress(),
+                    [modulebytes,],
+                    null,
+                    10000
+                ]
+            );
+
+            let txbytes = new Base64DataBuffer(resp_json.result.txBytes);
+            let publishTxn = await this.contractDeployerSigner.signAndExecuteTransaction(txbytes);  // TODO: RPCに置き換え
+
+            assert.equal(publishTxn.EffectsCert.effects.effects.status.status, "success");
+
+            for (let i = 0; i < publishTxn.EffectsCert.effects.effects.created.length; i++) {
+                const element = publishTxn.EffectsCert.effects.effects.created[i];
+                
+                if (element.owner === "Immutable") {
+                    // Package
+                    let packageId = element.reference.objectId;
+                    if (this.contracts.hasOwnProperty(key) === false) {
+                        CaliperUtils.log('a');
+                        this.contracts[key] = {
+                            packageId: null,
+                            initializedObjects: [],
+                        }
+                    }
+                    this.contracts[key].packageId = packageId;
+                } else {
+                    // Initialized Object
+                    let objectId = element.reference.objectId;
+                    if (this.contracts.hasOwnProperty(key) === false) {
+                        this.contracts[key] = {
+                            packageId: null,
+                            initializedObjects: [],
+                        }
+                    }
+                    this.contracts[key].initializedObjects.push(objectId);
+                }
+            }
+
+            logger.info(`Deployed contracts: ${JSON.stringify(this.contracts)}`);
         }
-
-        let resp_json = await this.callRpc('sui_publish', params);
-        let txbytes = new Base64DataBuffer(resp_json.result.txBytes);
-
-        let publishTxn = await this.contractDeployerSigner.signAndExecuteTransaction(txbytes);
-        assert.equal(publishTxn.EffectsCert.effects.effects.status.status, "success");
-
-        for (let i = 0; i < publishTxn.EffectsCert.effects.effects.created.length; i++) {
-            const element = publishTxn.EffectsCert.effects.effects.created[i];
-            let packageId = element.reference.objectId;
-            let key = Object.keys(this.suiConfig.contracts)[i];
-            this.contracts[key] = packageId;
-        }
-
-        logger.info(`Deployed contracts: ${JSON.stringify(this.contracts)}`);
     }
 
 
@@ -179,12 +200,22 @@ class SuiConnector extends ConnectorBase {
             return this.readRequest(requests);
         }
 
-        let packageId = this.context.contracts[requests.package];
+        let packageId = this.context.contracts[requests.package].packageId;
         let gas = this.context.gasCoins.pop();
+
+        let args = [];
+        for (let i = 0; i < requests.args.length; i++) {
+            const element = requests.args[i];
+            if (element.hasOwnProperty('createdObject')) {
+                args.push('0x' + this.context.contracts[requests.package].initializedObjects[element.createdObject]);
+            } else {
+                args.push(element);
+            }
+        }
 
         let transaction = {
             signer: await this.fromSigner.getAddress(),
-            arguments: Object.values(requests.args),
+            arguments: args,
             function: requests.verb,
             gas: gas,
             gasBudget: 1000,  // TODO: estimate
@@ -193,6 +224,8 @@ class SuiConnector extends ConnectorBase {
             typeArguments: [],
         };
         let resp_json = await this.callRpc("sui_moveCall", transaction);
+        assert.equal(resp_json.hasOwnProperty('result'), true);
+
         let txbytes = new Base64DataBuffer(resp_json.result.txBytes);
 
 
@@ -236,7 +269,7 @@ class SuiConnector extends ConnectorBase {
     }
 
 
-    async readRequest() {
+    async readRequest(request) {
         // TODO: IMPL
     }
 

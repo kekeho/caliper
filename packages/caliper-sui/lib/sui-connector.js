@@ -196,6 +196,62 @@ class SuiConnector extends ConnectorBase {
      * @return {Promise<TxStatus>}
      */
     async _sendSingleRequest(requests) {
+        if (requests.hasOwnProperty('paySui')) {
+            let coin = this.context.gasCoins.pop();
+
+            let resp = await this.callRpc('sui_paySui', {
+                signer: this.fromKeypair.getPublicKey().toSuiAddress(),
+                input_coins: [coin],
+                recipients: [requests.recipient],
+                amounts: [requests.amount],
+                gas_budget: 100,
+            })
+            if (resp.hasOwnProperty('error')) {
+                CaliperUtils.log('ERROR: sui_paySui', resp);
+            }
+
+            let txbytes = new Base64DataBuffer(resp.result.txBytes);
+
+            let status = new TxStatus();
+
+            // BCS Serialize
+            const INTENT_BYTES = [0, 0, 0];
+            let intentMessage = new Uint8Array(INTENT_BYTES.length + txbytes.getLength());
+            intentMessage.set(INTENT_BYTES);
+            intentMessage.set(txbytes.getData(), INTENT_BYTES.length);
+            
+            let dataToSign = new Base64DataBuffer(intentMessage);
+            let signed = await this.fromSigner.signData(dataToSign);
+
+            let executedResp = await this.callRpc(
+                "sui_executeTransaction",
+                {
+                    tx_bytes: txbytes.toString(),
+                    sig_scheme: signed.signatureScheme,
+                    signature: signed.signature.toString(),
+                    pub_key: signed.pubKey.toBase64(),
+                    request_type: 'WaitForLocalExecution',
+                }
+            )
+
+            if (executedResp.hasOwnProperty('error')) {
+                status.SetStatusFail();
+                status.SetErrMsg(executedResp.error.message);
+                CaliperUtils.log("Failed", requests, JSON.stringify(executedResp, null, 2));
+            } else if (executedResp.result.EffectsCert.effects.effects.status.status == "success") {
+                status.SetStatusSuccess();
+                status.SetID(executedResp.result.EffectsCert.certificate.transactionDigest);
+                status.SetResult(executedResp);
+            } else {
+                status.SetStatusFail();
+                status.SetErrMsg(executedResp.result.EffectsCert.effects.effects.status.status);
+                CaliperUtils.log("Failed", requests, JSON.stringify(executedResp, null, 2));
+            }
+    
+            return status;
+        }
+
+
         if (requests.readOnly === true) {
             return this.readRequest(requests);
         }
